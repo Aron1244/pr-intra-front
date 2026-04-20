@@ -326,19 +326,8 @@ export default function UsersPage() {
           statusMessage={isLoadingUser || isLoadingUsers ? "Cargando usuarios..." : errorMessage ? errorMessage : "Usuarios sincronizados"}
         />
 
-        <section className="min-w-0 flex-1 px-4 py-6 lg:px-6 xl:px-8 2xl:px-10">
-          <div className="mx-auto w-full max-w-4xl space-y-6">
-            <header className="rounded-3xl border border-intra-border bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold tracking-[0.18em] text-intra-accent uppercase">
-                Administración
-              </p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-intra-secondary">
-                Gestión de usuarios
-              </h2>
-              <p className="mt-2 max-w-3xl text-base text-intra-secondary/70">
-                Crea, edita y elimina usuarios del sistema.
-              </p>
-            </header>
+        <section className="min-w-0 flex flex-1 flex-col px-4 py-6 lg:px-6 xl:px-8 2xl:px-10">
+          <div className="mx-auto flex min-h-0 w-full max-w-360 flex-1 flex-col space-y-4">
 
             {errorMessage ? (
               <div className={`rounded-3xl px-4 py-3 text-base shadow-sm ${isPermissionError ? "border border-amber-200 bg-amber-50 text-amber-800" : "border border-red-200 bg-red-50 text-red-700"}`}>
@@ -359,15 +348,15 @@ export default function UsersPage() {
             ) : null}
 
             {canAccessUsers ? (
-              <>
-                <section className="rounded-3xl border border-intra-border bg-white p-5 shadow-sm" ref={formSectionRef}>
+              <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[370px_minmax(0,1fr)]">
+                <section className="h-fit rounded-3xl border border-intra-border bg-white p-5 shadow-sm" ref={formSectionRef}>
                   <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-xl font-semibold text-intra-secondary">
+                    <h3 className="text-lg font-semibold text-intra-secondary">
                       {editingUserId ? "Editar usuario" : "Nuevo usuario"}
                     </h3>
                   </div>
 
-                  <form onSubmit={handleSubmitUser} className="mt-4 space-y-3">
+                  <form onSubmit={handleSubmitUser} className="mt-3 space-y-3">
                     <div>
                       <label htmlFor="user-name" className="text-sm font-medium text-intra-secondary">
                         Nombre
@@ -378,7 +367,7 @@ export default function UsersPage() {
                         value={formState.name}
                         onChange={(event) => setFormState((current) => ({ ...current, name: event.target.value }))}
                         placeholder="Ej. Juan Pérez"
-                        className="mt-1 w-full rounded-2xl border border-intra-border bg-white px-4 py-2.5 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                        className="mt-1 w-full rounded-xl border border-intra-border bg-white px-3 py-2 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
                       />
                     </div>
 
@@ -392,13 +381,13 @@ export default function UsersPage() {
                         value={formState.email}
                         onChange={(event) => setFormState((current) => ({ ...current, email: event.target.value }))}
                         placeholder="correo@empresa.com"
-                        className="mt-1 w-full rounded-2xl border border-intra-border bg-white px-4 py-2.5 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                        className="mt-1 w-full rounded-xl border border-intra-border bg-white px-3 py-2 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
                       />
                     </div>
 
                     <div>
                       <label htmlFor="user-password" className="text-sm font-medium text-intra-secondary">
-                        {editingUserId ? "Contraseña (dejar en blanco para no cambiar)" : "Contraseña"}
+                        {editingUserId ? "Contraseña (opcional)" : "Contraseña"}
                       </label>
                       <input
                         id="user-password"
@@ -406,22 +395,22 @@ export default function UsersPage() {
                         value={formState.password}
                         onChange={(event) => setFormState((current) => ({ ...current, password: event.target.value }))}
                         placeholder="Mínimo 8 caracteres"
-                        className="mt-1 w-full rounded-2xl border border-intra-border bg-white px-4 py-2.5 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                        className="mt-1 w-full rounded-xl border border-intra-border bg-white px-3 py-2 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
                       />
                     </div>
 
                     <div>
                       <label htmlFor="user-department" className="text-sm font-medium text-intra-secondary">
-                        Departamento (opcional)
+                        Departamento
                       </label>
                       <select
                         id="user-department"
                         value={formState.department_id}
                         onChange={(event) => setFormState((current) => ({ ...current, department_id: event.target.value }))}
-                        className="mt-1 w-full rounded-2xl border border-intra-border bg-white px-4 py-2.5 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                        className="mt-1 w-full rounded-xl border border-intra-border bg-white px-3 py-2 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
                       >
                         <option value="">Sin asignar</option>
-                        {departments.map((dept) => (
+                        {departments_sorted.map((dept) => (
                           <option key={dept.id} value={dept.id}>
                             {dept.name}
                           </option>
@@ -429,12 +418,12 @@ export default function UsersPage() {
                       </select>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                       {editingUserId ? (
                         <button
                           type="button"
                           onClick={resetForm}
-                          className="inline-flex h-10 items-center justify-center rounded-xl border border-intra-border px-4 text-sm font-semibold text-intra-secondary transition hover:bg-intra-ligth"
+                          className="inline-flex h-9 items-center justify-center rounded-xl border border-intra-border px-3 text-sm font-semibold text-intra-secondary transition hover:bg-intra-ligth"
                         >
                           Cancelar
                         </button>
@@ -442,16 +431,16 @@ export default function UsersPage() {
                       <button
                         type="submit"
                         disabled={isSavingUser}
-                        className="inline-flex h-10 items-center justify-center rounded-xl bg-intra-primary px-4 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-9 items-center justify-center rounded-xl bg-intra-primary px-4 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {isSavingUser ? "Guardando..." : editingUserId ? "Actualizar" : "Crear usuario"}
+                        {isSavingUser ? "Guardando..." : editingUserId ? "Actualizar" : "Crear"}
                       </button>
                     </div>
                   </form>
                 </section>
 
-                <section className="rounded-3xl border border-intra-border bg-white p-5 shadow-sm">
-                  <div className="space-y-4">
+                <section className="flex min-h-0 flex-1 flex-col rounded-3xl border border-intra-border bg-white p-5 shadow-sm">
+                  <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <h3 className="text-xl font-semibold text-intra-secondary">Usuarios del sistema</h3>
                       <span className="rounded-full bg-intra-ligth px-3 py-1 text-sm font-medium text-intra-secondary">
@@ -459,7 +448,7 @@ export default function UsersPage() {
                       </span>
                     </div>
 
-                    <div className="rounded-2xl border border-intra-border bg-intra-ligth/40 p-4">
+                    <div className="rounded-2xl border border-intra-border bg-intra-ligth/40 p-3">
                       <p className="text-sm font-semibold text-intra-secondary">Buscar por departamento</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
@@ -512,13 +501,13 @@ export default function UsersPage() {
                           value={searchTerm}
                           onChange={(event) => setSearchTerm(event.target.value)}
                           placeholder="Buscar por nombre o email"
-                          className="mt-1 w-full rounded-2xl border border-intra-border bg-white px-4 py-2.5 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                          className="mt-1 w-full rounded-xl border border-intra-border bg-white px-3 py-2 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-4 min-h-0 space-y-2 overflow-auto">
+                  <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-auto pr-1">
                     {isLoadingUsers ? (
                       <p className="text-base text-intra-secondary/70">Cargando usuarios...</p>
                     ) : null}
@@ -534,9 +523,9 @@ export default function UsersPage() {
                     ) : null}
 
                     {filteredUsers.map((u) => (
-                      <article key={u.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <article key={u.id} className="rounded-2xl border border-slate-200 bg-white p-3">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold text-slate-900">{u.name}</p>
                             <p className="mt-1 text-xs text-slate-600 break-all">{u.email}</p>
                             <p className="mt-1 text-xs text-slate-500">
@@ -565,7 +554,7 @@ export default function UsersPage() {
                     ))}
                   </div>
                 </section>
-              </>
+              </div>
             ) : null}
           </div>
         </section>

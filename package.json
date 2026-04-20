@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "driver.js": "^1.4.0",
     "laravel-echo": "^2.3.4",
     "next": "16.1.7",
     "pusher-js": "^8.5.0",

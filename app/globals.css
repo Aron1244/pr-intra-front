@@ -23,3 +23,48 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+.driver-popover.intra-driver-popover {
+  border-radius: 12px;
+  border: 1px solid #d4dfef;
+  box-shadow: 0 10px 24px rgba(15, 31, 56, 0.22);
+}
+
+.driver-popover.intra-driver-popover .driver-popover-title {
+  color: #0f1f38;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.driver-popover.intra-driver-popover .driver-popover-description,
+.driver-popover.intra-driver-popover .driver-popover-progress-text {
+  color: #334155;
+}
+
+.driver-popover.intra-driver-popover .driver-popover-footer button {
+  border-radius: 8px;
+  border: 1px solid #d4dfef;
+  background: #ffffff;
+  color: #0f1f38;
+  text-shadow: none;
+}
+
+.driver-popover.intra-driver-popover .driver-popover-next-btn,
+.driver-popover.intra-driver-popover .driver-popover-prev-btn {
+  background: #1c4fa3;
+  border-color: #1c4fa3;
+  color: #ffffff;
+}
+
+.driver-popover.intra-driver-popover .driver-popover-next-btn:hover,
+.driver-popover.intra-driver-popover .driver-popover-prev-btn:hover {
+  background: #173d7d;
+}
+
+body:not(.intra-tour-running) .driver-popover,
+body:not(.intra-tour-running) .driver-overlay,
+body:not(.intra-tour-running) .driver-stage,
+body:not(.intra-tour-running) .driver-overlay-animated,
+body:not(.intra-tour-running) .driver-overlay-svg {
+  display: none !important;
+}
