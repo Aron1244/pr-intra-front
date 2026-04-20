@@ -87,8 +87,8 @@ Aplicacion: `http://localhost:3000`
 	gestion/consulta de documentos.
 - `/dashboard/publications`:
 	publicaciones internas (visible segun permisos).
-- `/dashboard/roles`:
-	administracion de roles (admin).
+- `/dashboard/departments`:
+	administracion de departamentos y roles por departamento (admin).
 - `/dashboard/users`:
 	administracion de usuarios (admin).
 

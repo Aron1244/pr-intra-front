@@ -6,6 +6,8 @@ import { DashboardSidebar } from "@/components/dashboard-sidebar";
 import { API_BASE, ApiClientError, apiFetch } from "@/lib/api-client";
 import { clearAccessToken, getAccessToken } from "@/lib/auth-token";
 
+type DocumentsViewMode = "all" | "chat" | "department" | "other";
+
 type MeResponse = {
   data: {
     id: number;
@@ -98,6 +100,7 @@ export default function DocumentsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isPermissionError, setIsPermissionError] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [viewMode, setViewMode] = useState<DocumentsViewMode>("all");
   const [user, setUser] = useState<MeResponse["data"] | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
@@ -213,6 +216,75 @@ export default function DocumentsPage() {
     });
   }, [searchTerm, sortedDocuments]);
 
+  const getDocumentCategory = useCallback((document: DocumentItem): Exclude<DocumentsViewMode, "all"> => {
+    if (document.origin?.type === "chat") {
+      return "chat";
+    }
+
+    if (document.visibility === "department" || document.origin?.type === "folder" || document.folder?.department_id) {
+      return "department";
+    }
+
+    return "other";
+  }, []);
+
+  const visibleDocuments = useMemo(() => {
+    if (viewMode === "all") {
+      return filteredDocuments;
+    }
+
+    return filteredDocuments.filter((document) => getDocumentCategory(document) === viewMode);
+  }, [filteredDocuments, getDocumentCategory, viewMode]);
+
+  const documentsByChat = useMemo(() => {
+    const grouped = new Map<string, DocumentItem[]>();
+
+    for (const document of visibleDocuments) {
+      if (getDocumentCategory(document) !== "chat") {
+        continue;
+      }
+
+      const key = getOriginLabel(document);
+      grouped.set(key, [...(grouped.get(key) ?? []), document]);
+    }
+
+    return Array.from(grouped.entries());
+  }, [getDocumentCategory, visibleDocuments]);
+
+  const documentsByDepartment = useMemo(() => {
+    const grouped = new Map<string, DocumentItem[]>();
+
+    for (const document of visibleDocuments) {
+      if (getDocumentCategory(document) !== "department") {
+        continue;
+      }
+
+      const key = document.folder?.name ? `Carpeta: ${document.folder.name}` : getOriginLabel(document);
+      grouped.set(key, [...(grouped.get(key) ?? []), document]);
+    }
+
+    return Array.from(grouped.entries());
+  }, [getDocumentCategory, visibleDocuments]);
+
+  const otherDocuments = useMemo(
+    () => visibleDocuments.filter((document) => getDocumentCategory(document) === "other"),
+    [getDocumentCategory, visibleDocuments],
+  );
+
+  const countsByCategory = useMemo(() => {
+    const counts: Record<Exclude<DocumentsViewMode, "all">, number> = {
+      chat: 0,
+      department: 0,
+      other: 0,
+    };
+
+    for (const document of filteredDocuments) {
+      counts[getDocumentCategory(document)] += 1;
+    }
+
+    return counts;
+  }, [filteredDocuments, getDocumentCategory]);
+
   const handleDownloadDocument = useCallback(async (document: DocumentItem) => {
     const token = getAccessToken();
 
@@ -258,6 +330,41 @@ export default function DocumentsPage() {
     }
   }, []);
 
+  const renderDocumentCard = (document: DocumentItem) => (
+    <article
+      key={document.id}
+      className="rounded-2xl border border-intra-border p-4 text-left transition hover:bg-intra-ligth/40"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="mb-2 inline-flex rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800">
+            Origen: {getOriginLabel(document)}
+          </p>
+          <p className="font-semibold text-intra-secondary">
+            {document.original_name ?? document.title}
+          </p>
+          <p className="text-sm text-intra-secondary/60">
+            {document.mime_type ?? "Archivo"}
+            {formatFileSize(document.size_bytes) ? ` • ${formatFileSize(document.size_bytes)}` : ""}
+          </p>
+          <p className="mt-1 text-xs text-intra-secondary/55">
+            Visibilidad: {getVisibilityLabel(document.visibility)}
+            {document.folder?.name ? ` • Carpeta: ${document.folder.name}` : ""}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void handleDownloadDocument(document)}
+          disabled={isDownloadingDocumentId === document.id}
+          className="inline-flex h-10 items-center justify-center rounded-xl bg-intra-primary px-4 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isDownloadingDocumentId === document.id ? "Descargando..." : "Descargar"}
+        </button>
+      </div>
+    </article>
+  );
+
   return (
     <div className="min-h-screen bg-intra-ligth">
       <main className="flex min-h-screen w-full">
@@ -269,19 +376,8 @@ export default function DocumentsPage() {
           statusMessage={isLoadingUser || isLoadingDocuments ? "Cargando documentos..." : errorMessage ? errorMessage : "Documentos sincronizados"}
         />
 
-        <section className="min-w-0 flex-1 px-4 py-6 lg:px-6 xl:px-8 2xl:px-10">
-          <div className="mx-auto w-full max-w-360 space-y-6">
-            <header className="rounded-3xl border border-intra-border bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold tracking-[0.18em] text-intra-accent uppercase">
-                Documentos
-              </p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-intra-secondary">
-                Biblioteca de archivos
-              </h2>
-              <p className="mt-2 max-w-2xl text-base text-intra-secondary/70">
-                Consulta y descarga documentos disponibles para tu usuario y departamento.
-              </p>
-            </header>
+        <section className="min-w-0 flex flex-1 flex-col px-4 py-6 lg:px-6 xl:px-8 2xl:px-10">
+          <div className="mx-auto flex min-h-0 w-full max-w-360 flex-1 flex-col space-y-6">
 
             {errorMessage ? (
               <div className={`rounded-3xl px-4 py-3 text-base shadow-sm ${isPermissionError ? "border border-amber-200 bg-amber-50 text-amber-800" : "border border-red-200 bg-red-50 text-red-700"}`}>
@@ -295,11 +391,11 @@ export default function DocumentsPage() {
               </div>
             ) : null}
 
-            <section className="rounded-3xl border border-intra-border bg-white p-5 shadow-sm">
+            <section className="flex min-h-0 flex-1 flex-col rounded-3xl border border-intra-border bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-xl font-semibold text-intra-secondary">Archivos</h3>
                 <span className="rounded-full bg-intra-ligth px-3 py-1 text-sm font-medium text-intra-secondary">
-                  {filteredDocuments.length}
+                  {visibleDocuments.length}
                 </span>
               </div>
 
@@ -313,7 +409,54 @@ export default function DocumentsPage() {
                 />
               </div>
 
-              <div className="mt-4 min-h-0 space-y-3 overflow-auto pr-1">
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("all")}
+                  className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${
+                    viewMode === "all"
+                      ? "bg-intra-primary text-white"
+                      : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                  }`}
+                >
+                  Todos ({filteredDocuments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("chat")}
+                  className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${
+                    viewMode === "chat"
+                      ? "bg-intra-primary text-white"
+                      : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                  }`}
+                >
+                  Chat ({countsByCategory.chat})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("department")}
+                  className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${
+                    viewMode === "department"
+                      ? "bg-intra-primary text-white"
+                      : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                  }`}
+                >
+                  Departamento ({countsByCategory.department})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("other")}
+                  className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${
+                    viewMode === "other"
+                      ? "bg-intra-primary text-white"
+                      : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                  }`}
+                >
+                  Otros ({countsByCategory.other})
+                </button>
+              </div>
+
+              <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-auto pr-1">
                 {isLoadingDocuments ? (
                   <p className="text-base text-intra-secondary/70">Cargando documentos...</p>
                 ) : null}
@@ -322,44 +465,55 @@ export default function DocumentsPage() {
                   <p className="text-base text-intra-secondary/70">No hay documentos disponibles.</p>
                 ) : null}
 
-                {!isLoadingDocuments && sortedDocuments.length > 0 && filteredDocuments.length === 0 ? (
+                {!isLoadingDocuments && sortedDocuments.length > 0 && visibleDocuments.length === 0 ? (
                   <p className="text-base text-intra-secondary/70">No se encontraron archivos con esa busqueda.</p>
                 ) : null}
 
-                {filteredDocuments.map((document) => (
-                  <article
-                    key={document.id}
-                    className="rounded-2xl border border-intra-border p-4 text-left transition hover:bg-intra-ligth/40"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="mb-2 inline-flex rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800">
-                          Origen: {getOriginLabel(document)}
-                        </p>
-                        <p className="font-semibold text-intra-secondary">
-                          {document.original_name ?? document.title}
-                        </p>
-                        <p className="text-sm text-intra-secondary/60">
-                          {document.mime_type ?? "Archivo"}
-                          {formatFileSize(document.size_bytes) ? ` • ${formatFileSize(document.size_bytes)}` : ""}
-                        </p>
-                        <p className="mt-1 text-xs text-intra-secondary/55">
-                          Visibilidad: {getVisibilityLabel(document.visibility)}
-                          {document.folder?.name ? ` • Carpeta: ${document.folder.name}` : ""}
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => void handleDownloadDocument(document)}
-                        disabled={isDownloadingDocumentId === document.id}
-                        className="inline-flex h-10 items-center justify-center rounded-xl bg-intra-primary px-4 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isDownloadingDocumentId === document.id ? "Descargando..." : "Descargar"}
-                      </button>
+                {documentsByChat.length > 0 ? (
+                  <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-blue-900">Archivos de chat</h4>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-blue-800">
+                        {countsByCategory.chat}
+                      </span>
                     </div>
-                  </article>
-                ))}
+                    {documentsByChat.map(([groupLabel, groupDocuments]) => (
+                      <div key={groupLabel} className="space-y-2">
+                        <p className="text-xs font-semibold text-blue-900/80">{groupLabel}</p>
+                        <div className="space-y-2">{groupDocuments.map(renderDocumentCard)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {documentsByDepartment.length > 0 ? (
+                  <div className="space-y-3 rounded-2xl border border-emerald-100 bg-emerald-50/30 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-emerald-900">Archivos de departamento</h4>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                        {countsByCategory.department}
+                      </span>
+                    </div>
+                    {documentsByDepartment.map(([groupLabel, groupDocuments]) => (
+                      <div key={groupLabel} className="space-y-2">
+                        <p className="text-xs font-semibold text-emerald-900/80">{groupLabel}</p>
+                        <div className="space-y-2">{groupDocuments.map(renderDocumentCard)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {otherDocuments.length > 0 ? (
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/40 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-slate-800">Otros archivos</h4>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        {countsByCategory.other}
+                      </span>
+                    </div>
+                    <div className="space-y-2">{otherDocuments.map(renderDocumentCard)}</div>
+                  </div>
+                ) : null}
               </div>
             </section>
           </div>

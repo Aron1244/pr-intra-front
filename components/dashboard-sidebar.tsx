@@ -15,7 +15,7 @@ type DashboardSidebarProps = {
   } | null;
   isAdmin: boolean;
   canManageAnnouncements?: boolean;
-  activeRoute: "dashboard" | "conversations" | "documents" | "publications" | "roles" | "users";
+  activeRoute: "dashboard" | "conversations" | "documents" | "publications" | "users" | "departments";
   statusMessage: string;
 };
 
@@ -50,9 +50,9 @@ export function DashboardSidebar({
 
   if (isAdmin) {
     routes.push({
-      label: "Roles",
-      href: "/dashboard/roles",
-      active: activeRoute === "roles",
+      label: "Departamentos",
+      href: "/dashboard/departments",
+      active: activeRoute === "departments",
     });
     routes.push({
       label: "Usuarios",

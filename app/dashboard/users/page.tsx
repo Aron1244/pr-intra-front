@@ -61,6 +61,8 @@ export default function UsersPage() {
   const [user, setUser] = useState<MeResponse["data"] | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState("");
   const [formState, setFormState] = useState<UserFormState>(INITIAL_FORM_STATE);
   const formSectionRef = useRef<HTMLDivElement>(null);
 
@@ -141,6 +143,38 @@ export default function UsersPage() {
   }, [loadUsers, loadDepartments]);
 
   const users_sorted = users.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const departments_sorted = departments.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+
+  const filteredUsers = users_sorted.filter((u) => {
+    const matchesDepartment =
+      selectedDepartmentFilter === "all"
+        ? true
+        : selectedDepartmentFilter === "unassigned"
+          ? u.department_id === null
+          : u.department_id === Number(selectedDepartmentFilter);
+
+    const matchesSearch =
+      normalizedSearchTerm.length === 0 ||
+      u.name.toLowerCase().includes(normalizedSearchTerm) ||
+      u.email.toLowerCase().includes(normalizedSearchTerm);
+
+    return matchesDepartment && matchesSearch;
+  });
+
+  const usersWithoutDepartmentCount = users_sorted.filter((u) => u.department_id === null).length;
+
+  const getDepartmentUsersCount = (departmentId: number): number =>
+    users_sorted.filter((u) => u.department_id === departmentId).length;
+
+  const currentFilterLabel =
+    selectedDepartmentFilter === "all"
+      ? "Todos los departamentos"
+      : selectedDepartmentFilter === "unassigned"
+        ? "Sin departamento"
+        : departments_sorted.find((dept) => dept.id === Number(selectedDepartmentFilter))?.name ??
+          "Departamento";
 
   const getDepartmentName = (deptId: number | null): string => {
     if (!deptId) return "Sin asignar";
@@ -186,7 +220,12 @@ export default function UsersPage() {
     setIsPermissionError(false);
 
     try {
-      const payload: Record<string, unknown> = {
+      const payload: {
+        name: string;
+        email: string;
+        department_id: number | null;
+        password?: string;
+      } = {
         name: normalizedName,
         email: normalizedEmail,
         department_id: deptId,
@@ -412,11 +451,71 @@ export default function UsersPage() {
                 </section>
 
                 <section className="rounded-3xl border border-intra-border bg-white p-5 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-xl font-semibold text-intra-secondary">Usuarios del sistema</h3>
-                    <span className="rounded-full bg-intra-ligth px-3 py-1 text-sm font-medium text-intra-secondary">
-                      {users_sorted.length}
-                    </span>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="text-xl font-semibold text-intra-secondary">Usuarios del sistema</h3>
+                      <span className="rounded-full bg-intra-ligth px-3 py-1 text-sm font-medium text-intra-secondary">
+                        {filteredUsers.length} / {users_sorted.length}
+                      </span>
+                    </div>
+
+                    <div className="rounded-2xl border border-intra-border bg-intra-ligth/40 p-4">
+                      <p className="text-sm font-semibold text-intra-secondary">Buscar por departamento</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDepartmentFilter("all")}
+                          className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                            selectedDepartmentFilter === "all"
+                              ? "bg-intra-accent text-white"
+                              : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                          }`}
+                        >
+                          Todos ({users_sorted.length})
+                        </button>
+
+                        {departments_sorted.map((dept) => (
+                          <button
+                            key={dept.id}
+                            type="button"
+                            onClick={() => setSelectedDepartmentFilter(String(dept.id))}
+                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                              selectedDepartmentFilter === String(dept.id)
+                                ? "bg-intra-accent text-white"
+                                : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                            }`}
+                          >
+                            {dept.name} ({getDepartmentUsersCount(dept.id)})
+                          </button>
+                        ))}
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDepartmentFilter("unassigned")}
+                          className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                            selectedDepartmentFilter === "unassigned"
+                              ? "bg-intra-accent text-white"
+                              : "border border-intra-border bg-white text-intra-secondary hover:bg-intra-ligth"
+                          }`}
+                        >
+                          Sin departamento ({usersWithoutDepartmentCount})
+                        </button>
+                      </div>
+
+                      <div className="mt-3">
+                        <label htmlFor="users-search" className="text-sm font-medium text-intra-secondary">
+                          Buscar en {currentFilterLabel.toLowerCase()}
+                        </label>
+                        <input
+                          id="users-search"
+                          type="text"
+                          value={searchTerm}
+                          onChange={(event) => setSearchTerm(event.target.value)}
+                          placeholder="Buscar por nombre o email"
+                          className="mt-1 w-full rounded-2xl border border-intra-border bg-white px-4 py-2.5 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="mt-4 min-h-0 space-y-2 overflow-auto">
@@ -428,15 +527,23 @@ export default function UsersPage() {
                       <p className="text-base text-intra-secondary/70">Aun no hay usuarios.</p>
                     ) : null}
 
-                    {users_sorted.map((u) => (
+                    {!isLoadingUsers && users_sorted.length > 0 && filteredUsers.length === 0 ? (
+                      <p className="text-base text-intra-secondary/70">
+                        No hay usuarios para el filtro seleccionado.
+                      </p>
+                    ) : null}
+
+                    {filteredUsers.map((u) => (
                       <article key={u.id} className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-slate-900">{u.name}</p>
                             <p className="mt-1 text-xs text-slate-600 break-all">{u.email}</p>
-                            <p className="mt-1 text-xs text-slate-500">{getDepartmentName(u.department_id)}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Departamento: {getDepartmentName(u.department_id)}
+                            </p>
                           </div>
-                          <div className="flex gap-2 flex-shrink-0">
+                          <div className="flex shrink-0 gap-2">
                             <button
                               type="button"
                               onClick={() => handleEditUser(u)}

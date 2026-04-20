@@ -36,6 +36,18 @@ type AppUser = {
   id: number;
   name: string;
   email: string;
+  department_id?: number | null;
+};
+
+type Department = {
+  id: number;
+  name: string;
+};
+
+type RoleSummary = {
+  id: number;
+  name: string;
+  department_id?: number | null;
 };
 
 type DocumentAttachment = {
@@ -92,6 +104,7 @@ export default function ConversationsPage() {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [isLoadingChatModalData, setIsLoadingChatModalData] = useState(false);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -100,7 +113,14 @@ export default function ConversationsPage() {
   const [user, setUser] = useState<MeResponse["data"] | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [rolesCatalog, setRolesCatalog] = useState<RoleSummary[]>([]);
+  const [userRolesByUserId, setUserRolesByUserId] = useState<Record<number, RoleSummary[]>>({});
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [isCreateChatModalOpen, setIsCreateChatModalOpen] = useState(false);
+  const [chatDepartmentFilter, setChatDepartmentFilter] = useState<string>("all");
+  const [chatRoleFilter, setChatRoleFilter] = useState<string>("all");
+  const [chatNameSearch, setChatNameSearch] = useState("");
   const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -108,6 +128,8 @@ export default function ConversationsPage() {
   const [incomingMessageNotice, setIncomingMessageNotice] = useState<IncomingMessageNotice | null>(null);
   const [unreadByConversation, setUnreadByConversation] = useState<Record<number, number>>({});
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [messageSearchTerm, setMessageSearchTerm] = useState("");
+  const [activeSearchMatchIndex, setActiveSearchMatchIndex] = useState(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [recentlyBumpedConversationId, setRecentlyBumpedConversationId] = useState<number | null>(null);
   const chatBroadcastRef = useRef<BroadcastChannel | null>(null);
@@ -119,6 +141,18 @@ export default function ConversationsPage() {
   const currentUserIdRef = useRef<number | null>(null);
   const bumpConversationTimeoutRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const adjustComposerHeight = useCallback(() => {
+    const textarea = messageInputRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = "auto";
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 38), 120);
+    textarea.style.height = `${nextHeight}px`;
+  }, []);
 
   function setHandledError(error: unknown, fallbackMessage: string) {
     if (error instanceof ApiClientError) {
@@ -190,10 +224,122 @@ export default function ConversationsPage() {
   const roles = user?.roles?.map((role) => role.name.toLowerCase()) ?? [];
   const isAdmin = roles.includes("admin");
   const canManageAnnouncements = Boolean(user?.can_manage_announcements);
-  const availableUsers = useMemo(
-    () => users.filter((candidate) => candidate.id !== user?.id),
+  const currentUserDepartmentId = useMemo(
+    () => users.find((candidate) => candidate.id === user?.id)?.department_id ?? null,
     [user?.id, users],
   );
+  const availableUsers = useMemo(
+    () =>
+      users.filter((candidate) => {
+        if (candidate.id === user?.id) {
+          return false;
+        }
+
+        if (isAdmin) {
+          return true;
+        }
+
+        if (currentUserDepartmentId === null) {
+          return false;
+        }
+
+        return candidate.department_id === currentUserDepartmentId;
+      }),
+    [currentUserDepartmentId, isAdmin, user?.id, users],
+  );
+
+  const filteredAvailableUsers = useMemo(() => {
+    const normalizedSearch = chatNameSearch.trim().toLowerCase();
+
+    return availableUsers.filter((candidate) => {
+      const userRoles = userRolesByUserId[candidate.id] ?? [];
+      const userDepartmentId = candidate.department_id ?? null;
+      const normalizedRoleFilter = Number(chatRoleFilter);
+      const departmentMatches =
+        !isAdmin
+          ? currentUserDepartmentId !== null && userDepartmentId === currentUserDepartmentId
+          : chatDepartmentFilter === "all"
+            ? true
+            : chatDepartmentFilter === "unassigned"
+              ? userDepartmentId === null
+              : userDepartmentId === Number(chatDepartmentFilter);
+
+      const roleMatches =
+        !isAdmin || chatRoleFilter === "all"
+          ? true
+          : userRoles.some((role) => role.id === normalizedRoleFilter);
+
+      const searchMatches =
+        normalizedSearch.length === 0 ||
+        candidate.name.toLowerCase().includes(normalizedSearch);
+
+      return departmentMatches && roleMatches && searchMatches;
+    });
+  }, [availableUsers, chatDepartmentFilter, chatNameSearch, chatRoleFilter, currentUserDepartmentId, isAdmin, userRolesByUserId]);
+
+  const loadCreateChatModalData = useCallback(async () => {
+    setIsLoadingChatModalData(true);
+    try {
+      if (isAdmin) {
+        const [departmentsResponse, rolesResponse] = await Promise.all([
+          apiFetch<{ data: Department[] }>("/departments", { method: "GET" }),
+          apiFetch<{ data: RoleSummary[] }>("/roles", { method: "GET" }),
+        ]);
+
+        const normalizedDepartments = Array.isArray(departmentsResponse.data) ? departmentsResponse.data : [];
+        const normalizedRoles = Array.isArray(rolesResponse.data) ? rolesResponse.data : [];
+
+        setDepartments(normalizedDepartments);
+        setRolesCatalog(normalizedRoles);
+      }
+
+      const rolePairs = await Promise.all(
+        availableUsers.map(async (candidate) => {
+          try {
+            const response = await apiFetch<{ data: { user_id: number; roles: RoleSummary[] } }>(
+              `/users/${candidate.id}/roles`,
+              { method: "GET" },
+            );
+
+            return [candidate.id, response.data.roles ?? []] as const;
+          } catch {
+            return [candidate.id, []] as const;
+          }
+        }),
+      );
+
+      const nextRolesByUserId: Record<number, RoleSummary[]> = {};
+      for (const [userId, userRoles] of rolePairs) {
+        nextRolesByUserId[userId] = userRoles;
+      }
+      setUserRolesByUserId(nextRolesByUserId);
+    } catch (error) {
+      setHandledError(error, "No se pudo cargar los filtros para crear chat.");
+    } finally {
+      setIsLoadingChatModalData(false);
+    }
+  }, [availableUsers, isAdmin]);
+
+  const openCreateChatModal = async () => {
+    setIsCreateChatModalOpen(true);
+    setSelectedUserIds([]);
+    setChatDepartmentFilter("all");
+    setChatRoleFilter("all");
+    setChatNameSearch("");
+    setErrorMessage(null);
+    setIsPermissionError(false);
+
+    const needsAdminCatalogData = isAdmin && (departments.length === 0 || rolesCatalog.length === 0);
+    const needsUserRoles = Object.keys(userRolesByUserId).length === 0;
+
+    if (needsAdminCatalogData || needsUserRoles) {
+      await loadCreateChatModalData();
+    }
+  };
+
+  const closeCreateChatModal = () => {
+    setIsCreateChatModalOpen(false);
+  };
 
   const uniqueConversations = useMemo(() => {
     const grouped = new Map<string, Conversation>();
@@ -237,6 +383,30 @@ export default function ConversationsPage() {
     () => (selectedConversation ? messagesByConversation[selectedConversation.id] ?? [] : []),
     [messagesByConversation, selectedConversation],
   );
+
+  const matchedMessageIds = useMemo(() => {
+    const normalizedTerm = messageSearchTerm.trim().toLowerCase();
+    if (!normalizedTerm) {
+      return [] as string[];
+    }
+
+    return selectedConversationMessages
+      .filter((message) => {
+        const contentMatch = message.content.toLowerCase().includes(normalizedTerm);
+        const attachmentName = message.document
+          ? (message.document.original_name ?? message.document.title ?? `Documento ${message.document.id}`)
+          : "";
+        const attachmentMatch = message.document
+          ? attachmentName.toLowerCase().includes(normalizedTerm)
+          : false;
+
+        return contentMatch || attachmentMatch;
+      })
+      .map((message) => message.id);
+  }, [messageSearchTerm, selectedConversationMessages]);
+
+  const activeMatchedMessageId =
+    matchedMessageIds.length > 0 ? matchedMessageIds[activeSearchMatchIndex] ?? null : null;
   const unreadStorageKey = user?.id ? `${UNREAD_STORAGE_KEY_PREFIX}:${user.id}` : null;
 
   const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -364,6 +534,10 @@ export default function ConversationsPage() {
   }, [successMessage]);
 
   useEffect(() => {
+    adjustComposerHeight();
+  }, [adjustComposerHeight, draftMessage]);
+
+  useEffect(() => {
     if (!highlightedMessageId) {
       return;
     }
@@ -376,6 +550,23 @@ export default function ConversationsPage() {
       window.clearTimeout(timeoutId);
     };
   }, [highlightedMessageId]);
+
+  useEffect(() => {
+    setActiveSearchMatchIndex(0);
+  }, [messageSearchTerm, selectedConversation?.id]);
+
+  useEffect(() => {
+    if (!activeMatchedMessageId) {
+      return;
+    }
+
+    const targetMessage = window.document.getElementById(`message-${activeMatchedMessageId}`);
+    if (!targetMessage) {
+      return;
+    }
+
+    targetMessage.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeMatchedMessageId]);
 
   const normalizeBackendMessages = useCallback(
     (conversation: Conversation, backendMessages: BackendMessage[]) =>
@@ -969,10 +1160,6 @@ export default function ConversationsPage() {
   const handleCreateConversation = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!isAdmin) {
-      return;
-    }
-
     if (selectedUserIds.length === 0) {
       setErrorMessage("Selecciona al menos un usuario para iniciar el chat.");
       setIsPermissionError(false);
@@ -1003,6 +1190,7 @@ export default function ConversationsPage() {
         setSelectedConversationId(existingConversation.id);
         setSuccessMessage("Ya existe una conversacion con esos usuarios. La hemos reutilizado en la lista.");
         setSelectedUserIds([]);
+        closeCreateChatModal();
         return;
       }
 
@@ -1020,6 +1208,7 @@ export default function ConversationsPage() {
         [createdConversation.id]: [],
       }));
       setSelectedUserIds([]);
+      closeCreateChatModal();
       setSuccessMessage("Chat creado correctamente.");
 
       chatBroadcastRef.current?.postMessage({
@@ -1241,6 +1430,22 @@ export default function ConversationsPage() {
     }
   };
 
+  const handleGoToNextMatch = () => {
+    if (matchedMessageIds.length === 0) {
+      return;
+    }
+
+    setActiveSearchMatchIndex((current) => (current + 1) % matchedMessageIds.length);
+  };
+
+  const handleGoToPreviousMatch = () => {
+    if (matchedMessageIds.length === 0) {
+      return;
+    }
+
+    setActiveSearchMatchIndex((current) => (current - 1 + matchedMessageIds.length) % matchedMessageIds.length);
+  };
+
   return (
     <div className="min-h-screen bg-intra-ligth">
       <main className="flex min-h-screen w-full">
@@ -1252,20 +1457,8 @@ export default function ConversationsPage() {
           statusMessage={isLoadingUser || isLoadingConversations ? "Cargando conversaciones..." : errorMessage ? errorMessage : "Conversaciones sincronizadas"}
         />
 
-        <section className="min-w-0 flex-1 px-4 py-6 lg:px-6 xl:px-8 2xl:px-10">
-          <div className="mx-auto w-full max-w-360 space-y-6">
-            <header className="rounded-3xl border border-intra-border bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold tracking-[0.18em] text-intra-accent uppercase">
-                Conversaciones
-              </p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-intra-secondary">
-                Ruta inicial de chats
-              </h2>
-              <p className="mt-2 max-w-2xl text-base text-intra-secondary/70">
-                Esta pantalla prueba la ruta /dashboard/conversations y el consumo de /conversations con Bearer token.
-              </p>
-            </header>
-
+        <section className="min-w-0 flex flex-1 flex-col px-4 py-6 lg:px-6 xl:px-8 2xl:px-10">
+          <div className="mx-auto flex min-h-0 w-full max-w-360 flex-1 flex-col space-y-6">
             {errorMessage ? (
               <div className={`rounded-3xl px-4 py-3 text-base shadow-sm ${isPermissionError ? "border border-amber-200 bg-amber-50 text-amber-800" : "border border-red-200 bg-red-50 text-red-700"}`}>
                 {isPermissionError ? (
@@ -1283,8 +1476,8 @@ export default function ConversationsPage() {
               </div>
             ) : null}
 
-            <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)] lg:items-start">
-              <section className="flex h-144 flex-col rounded-3xl border border-intra-border bg-white p-5 shadow-sm lg:h-[calc(100vh-12rem)]">
+            <div className="grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)] lg:items-start">
+              <section className="flex h-144 flex-col rounded-3xl border border-intra-border bg-white p-5 shadow-sm lg:h-full lg:min-h-0">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-semibold text-intra-secondary">Conversaciones</h3>
                   <span className="rounded-full bg-intra-ligth px-3 py-1 text-sm font-medium text-intra-secondary">
@@ -1356,12 +1549,11 @@ export default function ConversationsPage() {
                   })}
                 </div>
 
-                {isAdmin ? (
-                  <form onSubmit={handleCreateConversation} className="mt-4 rounded-3xl border border-intra-border bg-intra-ligth/35 p-4">
+                <div className="mt-4 rounded-3xl border border-intra-border bg-intra-ligth/35 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold tracking-[0.18em] text-intra-accent uppercase">
-                          Admin
+                          {isAdmin ? "Admin" : "Chat"}
                         </p>
                         <h4 className="mt-1 text-lg font-semibold tracking-tight text-intra-secondary">
                           Iniciar chat nuevo
@@ -1372,55 +1564,73 @@ export default function ConversationsPage() {
                       </span>
                     </div>
 
-                    <div className="mt-3 max-h-36 space-y-2 overflow-auto pr-1">
-                      {isLoadingUsers ? (
-                        <p className="text-base text-intra-secondary/70">Cargando usuarios activos...</p>
-                      ) : null}
-
-                      {!isLoadingUsers && availableUsers.length === 0 ? (
-                        <p className="text-base text-intra-secondary/70">No hay usuarios disponibles para iniciar chat.</p>
-                      ) : null}
-
-                      {availableUsers.map((candidate) => {
-                        const selected = selectedUserIds.includes(candidate.id);
-
-                        return (
-                          <label
-                            key={candidate.id}
-                            className={`flex cursor-pointer items-center justify-between gap-2 rounded-2xl border px-3 py-2 transition ${selected ? "border-intra-primary bg-white" : "border-intra-border bg-white/70 hover:bg-white"}`}
-                          >
-                            <div>
-                              <p className="text-base font-semibold text-intra-secondary">{candidate.name}</p>
-                            </div>
-                            <input
-                              type="checkbox"
-                              checked={selected}
-                              onChange={() => handleToggleUser(candidate.id)}
-                              className="h-4 w-4 rounded border-intra-border text-intra-primary focus:ring-intra-primary"
-                            />
-                          </label>
-                        );
-                      })}
-                    </div>
-
                     <button
-                      type="submit"
-                      disabled={isCreatingConversation || selectedUserIds.length === 0}
+                      type="button"
+                      onClick={() => void openCreateChatModal()}
+                      disabled={!isAdmin && currentUserDepartmentId === null}
                       className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-xl bg-intra-primary px-4 text-base font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {isCreatingConversation ? "Creando..." : "Iniciar chat"}
+                      Nuevo chat
                     </button>
-                  </form>
-                ) : null}
+                    {!isAdmin && currentUserDepartmentId === null ? (
+                      <p className="mt-2 text-xs text-intra-secondary/70">
+                        Necesitas tener un departamento asignado para iniciar chats.
+                      </p>
+                    ) : null}
+                  </div>
               </section>
 
-              <section className="flex h-144 flex-col rounded-3xl border border-intra-border bg-white p-6 shadow-sm lg:h-[calc(100vh-12rem)]">
-                <p className="text-sm font-semibold tracking-[0.18em] text-intra-accent uppercase">
-                  Vista previa
-                </p>
-                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-intra-secondary">
-                  {selectedConversation ? selectedConversation.name ?? `Conversacion ${selectedConversation.id}` : "Panel de conversacion"}
-                </h3>
+              <section className="flex h-144 flex-col overflow-hidden rounded-3xl border border-intra-border bg-white p-6 shadow-sm lg:h-full lg:min-h-0">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-2xl font-semibold tracking-tight text-intra-secondary">
+                    {selectedConversation ? selectedConversation.name ?? `Conversacion ${selectedConversation.id}` : "Panel de conversacion"}
+                  </h3>
+
+                  {selectedConversation ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="search"
+                        value={messageSearchTerm}
+                        onChange={(event) => setMessageSearchTerm(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            handleGoToNextMatch();
+                          }
+                        }}
+                        placeholder="Buscar mensaje..."
+                        className="h-9 w-56 rounded-xl border border-intra-border bg-white px-3 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={handleGoToPreviousMatch}
+                        disabled={matchedMessageIds.length === 0}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-intra-border bg-white text-sm font-semibold text-intra-secondary transition hover:bg-intra-ligth disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label="Coincidencia anterior"
+                      >
+                        ↑
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleGoToNextMatch}
+                        disabled={matchedMessageIds.length === 0}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-intra-border bg-white text-sm font-semibold text-intra-secondary transition hover:bg-intra-ligth disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label="Coincidencia siguiente"
+                      >
+                        ↓
+                      </button>
+
+                      <span className="min-w-14 text-right text-xs font-semibold text-intra-secondary/70">
+                        {matchedMessageIds.length > 0
+                          ? `${activeSearchMatchIndex + 1}/${matchedMessageIds.length}`
+                          : "0/0"}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
                 <p className="mt-2 max-w-2xl text-base text-intra-secondary/70">
                   {selectedConversation
                     ? `Conversacion ${selectedConversation.type} con ${selectedConversation.users.length} participante(s).`
@@ -1438,24 +1648,33 @@ export default function ConversationsPage() {
                 ) : null}
 
                 {selectedConversation ? (
-                  <div className="relative mt-6 flex min-h-0 flex-1 flex-col space-y-4">
-                    <div className="relative min-h-0 flex-1">
+                  <div className="relative mt-6 flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
+                    <div className="relative min-h-0 flex-1 overflow-hidden">
                       <div
                         ref={messagesContainerRef}
                         onScroll={handleMessagesScroll}
-                        className="min-h-0 h-full space-y-3 overflow-auto rounded-3xl border border-intra-border bg-intra-ligth/20 p-4"
+                        className="h-full min-h-0 space-y-3 overflow-y-auto overscroll-contain rounded-3xl border border-intra-border bg-intra-ligth/20 p-4"
                       >
                         {selectedConversationMessages.map((message) => {
                           const isOwnMessage = message.sender_id === user?.id;
+                          const isActiveSearchMatch = activeMatchedMessageId === message.id;
+                          const isHighlightedByJump = highlightedMessageId === message.id;
+                          const shouldHighlightRow = isActiveSearchMatch || isHighlightedByJump;
 
                           return (
                             <article
                               key={message.id}
-                              className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}
+                              id={`message-${message.id}`}
+                              className={`w-full rounded-xl px-2 py-1.5 transition ${
+                                shouldHighlightRow
+                                  ? "border border-amber-300 bg-amber-100/75"
+                                  : "border border-transparent"
+                              }`}
                             >
-                              <div
-                                className={`max-w-[80%] rounded-2xl px-4 py-3 text-base shadow-sm transition ${isOwnMessage ? "bg-intra-primary text-white" : "bg-white text-intra-secondary"} ${highlightedMessageId === message.id ? "ring-2 ring-sky-400 ring-offset-2 ring-offset-intra-ligth" : ""}`}
-                              >
+                              <div className={`flex w-full ${isOwnMessage ? "justify-end" : "justify-start"}`}>
+                                <div
+                                  className={`max-w-[80%] rounded-2xl px-4 py-3 text-base shadow-sm transition ${isOwnMessage ? "bg-intra-primary text-white" : "bg-white text-intra-secondary"}`}
+                                >
                                 <div className="flex items-center justify-between gap-3 text-sm opacity-80">
                                   <span className="font-semibold">{message.sender_name}</span>
                                   <div className="flex items-center gap-2">
@@ -1501,6 +1720,7 @@ export default function ConversationsPage() {
                                   </a>
                                 ) : null}
                               </div>
+                              </div>
                             </article>
                           );
                         })}
@@ -1535,33 +1755,53 @@ export default function ConversationsPage() {
                       ) : null}
                     </div>
 
-                    <form onSubmit={handleSendMessage} className="rounded-3xl border border-intra-border bg-intra-ligth/35 p-4">
-                      <label htmlFor="message" className="text-base font-medium text-intra-secondary">
-                        Nuevo mensaje
+                    <form onSubmit={handleSendMessage} className="rounded-3xl border border-intra-border bg-intra-ligth/35 p-3">
+                      <label htmlFor="message" className="sr-only">
+                        Mensaje
                       </label>
-                      <textarea
-                        id="message"
-                        value={draftMessage}
-                        onChange={(event) => setDraftMessage(event.target.value)}
-                        placeholder="Escribe un mensaje..."
-                        rows={3}
-                        onKeyDown={handleComposerKeyDown}
-                        className="mt-2 w-full rounded-2xl border border-intra-border bg-white px-4 py-3 text-base text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
-                      />
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200">
+                      <div className="flex items-end gap-2">
+                        <textarea
+                          ref={messageInputRef}
+                          id="message"
+                          value={draftMessage}
+                          onChange={(event) => setDraftMessage(event.target.value)}
+                          placeholder="Escribe un mensaje..."
+                          rows={1}
+                          onKeyDown={handleComposerKeyDown}
+                          className="w-full resize-none overflow-y-auto rounded-2xl border border-intra-border bg-white px-3 py-2 text-sm text-intra-secondary outline-none transition focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                        />
+                        <label
+                          title="Adjuntar archivo"
+                          aria-label="Adjuntar archivo"
+                          className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-slate-100 text-slate-700 transition hover:bg-slate-200"
+                        >
                           <input
                             ref={fileInputRef}
                             type="file"
                             onChange={handleAttachmentChange}
                             className="hidden"
                           />
-                          Adjuntar archivo
+                          <svg
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            className="h-4 w-4"
+                            aria-hidden="true"
+                          >
+                            <path d="M15.172 4.828a4 4 0 0 0-5.657 0l-5.01 5.01a3 3 0 1 0 4.243 4.242l4.657-4.657a2 2 0 1 0-2.828-2.829L6.04 11.132a1 1 0 0 0 1.414 1.414l4.243-4.243.707.707-4.243 4.243a2 2 0 1 1-2.829-2.828l4.95-4.95a3 3 0 1 1 4.243 4.243l-5.01 5.01a4 4 0 1 1-5.657-5.657l5.01-5.01a5 5 0 1 1 7.071 7.07l-5.01 5.01-.707-.707 5.01-5.01a4 4 0 0 0 0-5.656Z" />
+                          </svg>
                         </label>
 
+                        <button
+                          type="submit"
+                          disabled={isSendingMessage}
+                          className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl bg-intra-primary px-4 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isSendingMessage ? "..." : "Enviar"}
+                        </button>
+
                         {attachedFile ? (
-                          <span className="inline-flex max-w-full items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">
-                            <span className="max-w-[18rem] truncate">{attachedFile.name}</span>
+                          <span className="inline-flex max-w-[16rem] items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700">
+                            <span className="max-w-40 truncate">{attachedFile.name}</span>
                             <button
                               type="button"
                               onClick={() => {
@@ -1579,15 +1819,6 @@ export default function ConversationsPage() {
                           </span>
                         ) : null}
                       </div>
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          type="submit"
-                          disabled={isSendingMessage}
-                          className="inline-flex h-11 items-center justify-center rounded-xl bg-intra-primary px-5 text-base font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isSendingMessage ? "Enviando..." : "Enviar mensaje"}
-                        </button>
-                      </div>
                     </form>
                   </div>
                 ) : (
@@ -1601,6 +1832,166 @@ export default function ConversationsPage() {
 
               </section>
             </div>
+
+            {isCreateChatModalOpen ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+                <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-3xl border border-intra-border bg-white p-5 shadow-2xl">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold tracking-[0.18em] text-intra-accent uppercase">{isAdmin ? "Admin" : "Chat"}</p>
+                      <h4 className="mt-1 text-xl font-semibold text-intra-secondary">Crear nuevo chat</h4>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeCreateChatModal}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-intra-border text-intra-secondary transition hover:bg-intra-ligth"
+                      aria-label="Cerrar modal"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleCreateConversation} className="mt-4 flex min-h-0 flex-1 flex-col">
+                    {isAdmin ? (
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div>
+                          <label className="text-sm font-semibold text-intra-secondary">Departamento</label>
+                          <select
+                            value={chatDepartmentFilter}
+                            onChange={(event) => setChatDepartmentFilter(event.target.value)}
+                            className="mt-1 h-10 w-full rounded-xl border border-intra-border bg-white px-3 text-sm text-intra-secondary outline-none focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                          >
+                            <option value="all">Todos</option>
+                            <option value="unassigned">Sin departamento</option>
+                            {departments
+                              .slice()
+                              .sort((a, b) => a.name.localeCompare(b.name))
+                              .map((department) => (
+                                <option key={department.id} value={department.id}>
+                                  {department.name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-semibold text-intra-secondary">Rol</label>
+                          <select
+                            value={chatRoleFilter}
+                            onChange={(event) => setChatRoleFilter(event.target.value)}
+                            className="mt-1 h-10 w-full rounded-xl border border-intra-border bg-white px-3 text-sm text-intra-secondary outline-none focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                          >
+                            <option value="all">Todos</option>
+                            {rolesCatalog
+                              .slice()
+                              .sort((a, b) => a.name.localeCompare(b.name))
+                              .map((role) => (
+                                <option key={role.id} value={role.id}>
+                                  {role.name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-semibold text-intra-secondary">Buscar por nombre</label>
+                          <input
+                            type="search"
+                            value={chatNameSearch}
+                            onChange={(event) => setChatNameSearch(event.target.value)}
+                            placeholder="Ej: Juan"
+                            className="mt-1 h-10 w-full rounded-xl border border-intra-border bg-white px-3 text-sm text-intra-secondary outline-none focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                        <div>
+                          <label className="text-sm font-semibold text-intra-secondary">Buscar por nombre</label>
+                          <input
+                            type="search"
+                            value={chatNameSearch}
+                            onChange={(event) => setChatNameSearch(event.target.value)}
+                            placeholder="Buscar compañero"
+                            className="mt-1 h-10 w-full rounded-xl border border-intra-border bg-white px-3 text-sm text-intra-secondary outline-none focus:border-intra-primary focus:ring-4 focus:ring-intra-primary/15"
+                          />
+                        </div>
+                        <p className="text-xs text-intra-secondary/70">
+                          Solo usuarios de tu departamento
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-2xl border border-intra-border bg-intra-ligth/30 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-intra-secondary">Usuarios disponibles</p>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-intra-secondary">
+                          {filteredAvailableUsers.length} resultado(s)
+                        </span>
+                      </div>
+
+                      <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+                        {isLoadingUsers || isLoadingChatModalData ? (
+                          <p className="text-sm text-intra-secondary/70">Cargando datos del modal...</p>
+                        ) : null}
+
+                        {!isLoadingUsers && !isLoadingChatModalData && filteredAvailableUsers.length === 0 ? (
+                          <p className="text-sm text-intra-secondary/70">No hay usuarios con esos filtros.</p>
+                        ) : null}
+
+                        {filteredAvailableUsers.map((candidate) => {
+                          const selected = selectedUserIds.includes(candidate.id);
+                          const assignedRoles = userRolesByUserId[candidate.id] ?? [];
+
+                          return (
+                            <label
+                              key={candidate.id}
+                              className={`flex cursor-pointer items-center justify-between gap-3 rounded-2xl border px-3 py-2 transition ${selected ? "border-intra-primary bg-white" : "border-intra-border bg-white/70 hover:bg-white"}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-intra-secondary">{candidate.name}</p>
+                                <p className="truncate text-xs text-intra-secondary/70">{candidate.email}</p>
+                                <p className="truncate text-xs text-intra-secondary/60">
+                                  {candidate.department_id
+                                    ? departments.find((department) => department.id === candidate.department_id)?.name ?? "Departamento"
+                                    : "Sin departamento"}
+                                  {assignedRoles.length > 0
+                                    ? ` • ${assignedRoles.map((role) => role.name).join(", ")}`
+                                    : " • Sin rol"}
+                                </p>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => handleToggleUser(candidate.id)}
+                                className="h-4 w-4 shrink-0 rounded border-intra-border text-intra-primary focus:ring-intra-primary"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={closeCreateChatModal}
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-intra-border px-4 text-sm font-semibold text-intra-secondary transition hover:bg-intra-ligth"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isCreatingConversation || selectedUserIds.length === 0}
+                        className="inline-flex h-10 items-center justify-center rounded-xl bg-intra-primary px-4 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isCreatingConversation ? "Creando..." : "Iniciar chat"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
       </main>

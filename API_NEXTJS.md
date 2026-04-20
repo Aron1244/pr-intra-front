@@ -189,27 +189,183 @@ Validaciones:
 
 Rutas protegidas con Sanctum.
 
-- `GET /roles`
-- `POST /roles`
-- `GET /roles/{id}`
-- `PUT/PATCH /roles/{id}`
-- `DELETE /roles/{id}`
+**Importante:** Los roles ahora están asociados a departamentos. No se pueden crear roles sin un departamento.
 
-Notas importantes:
+- `GET /roles` - Listar todos los roles (ordenados por departamento)
+- `POST /roles` - Crear rol en un departamento
+- `GET /roles/{id}` - Ver rol específico
+- `PUT/PATCH /roles/{id}` - Actualizar rol
+- `DELETE /roles/{id}` - Eliminar rol
+- `GET /departments/{department}/roles` - Listar roles de un departamento específico
 
-- En el codigo existe la migracion con `name` unico para roles.
-- Actualmente faltan clases referenciadas por el controlador (`StoreRoleRequest`, `UpdateRoleRequest`, `RoleResource`).
-- Si no se agregan esas clases, estos endpoints pueden fallar al ejecutarse.
+### Listar todos los roles
 
-Sugerencia de payload esperado para crear/actualizar rol (segun modelo y migracion):
+- Metodo: `GET /roles`
+- Respuesta 200:
 
 ```json
 {
-  "name": "editor"
+  "data": [
+    {
+      "id": 1,
+      "name": "Gerente",
+      "department_id": 1,
+      "can_post_announcements": true,
+      "created_at": "2026-04-20T12:00:00.000000Z",
+      "updated_at": "2026-04-20T12:00:00.000000Z"
+    }
+  ]
 }
 ```
 
-## 6) Roles por Usuario
+### Crear rol
+
+- Metodo: `POST /roles`
+- Body (requerido):
+
+```json
+{
+  "name": "Gerente",
+  "department_id": 1,
+  "can_post_announcements": true
+}
+```
+
+Validaciones:
+
+- `name`: requerido, string, max 255, unico por departamento
+- `department_id`: requerido, debe existir en `departments.id`
+- `can_post_announcements`: opcional, boolean, default false
+
+Respuesta 201:
+
+```json
+{
+  "data": {
+    "id": 1,
+    "name": "Gerente",
+    "department_id": 1,
+    "can_post_announcements": true,
+    "created_at": "2026-04-20T12:00:00.000000Z",
+    "updated_at": "2026-04-20T12:00:00.000000Z"
+  }
+}
+```
+
+### Listar roles por departamento
+
+- Metodo: `GET /departments/{department}/roles`
+- Respuesta 200: coleccion de roles del departamento.
+
+### Actualizar rol
+
+- Metodo: `PUT/PATCH /roles/{id}`
+- Body (campos opcionales):
+
+```json
+{
+  "name": "Jefe de Área",
+  "can_post_announcements": false
+}
+```
+
+Validaciones:
+
+- `name`: opcional, único ignorando el rol actual, max 255
+- `can_post_announcements`: opcional, boolean
+- `department_id`: NO se puede actualizar
+
+### Eliminar rol
+
+- Metodo: `DELETE /roles/{id}`
+- Respuesta: `204 No Content`
+
+## 6) Endpoints de Departamentos
+
+Rutas protegidas con Sanctum.
+
+**Importante:** Los departamentos pueden tener múltiples roles asociados. Al eliminar un departamento, también se eliminan todos sus roles.
+
+### Listar departamentos
+
+- Metodo: `GET /departments`
+- Respuesta 200:
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Recursos Humanos",
+      "description": "Departamento de RH",
+      "created_at": "2026-04-20T12:00:00.000000Z",
+      "updated_at": "2026-04-20T12:00:00.000000Z"
+    }
+  ]
+}
+```
+
+### Crear departamento
+
+- Metodo: `POST /departments`
+- Body:
+
+```json
+{
+  "name": "Recursos Humanos",
+  "description": "Descripcion opcional del departamento"
+}
+```
+
+Validaciones:
+
+- `name`: requerido, string, max 255, unico
+- `description`: opcional, string
+
+Respuesta 201:
+
+```json
+{
+  "message": "Departamento creado exitosamente.",
+  "data": {
+    "id": 1,
+    "name": "Recursos Humanos",
+    "description": "Descripcion opcional del departamento",
+    "created_at": "2026-04-20T12:00:00.000000Z",
+    "updated_at": "2026-04-20T12:00:00.000000Z"
+  }
+}
+```
+
+### Ver departamento
+
+- Metodo: `GET /departments/{id}`
+
+Respuesta 200: resource de departamento.
+
+### Actualizar departamento
+
+- Metodo: `PUT/PATCH /departments/{id}`
+- Body (campos opcionales):
+
+```json
+{
+  "name": "Recursos Humanos Actualizado",
+  "description": "Nueva descripcion"
+}
+```
+
+Validaciones:
+
+- `name`: opcional, pero si se envia debe ser valido, unico ignorando el departamento actual
+- `description`: opcional, string
+
+### Eliminar departamento
+
+- Metodo: `DELETE /departments/{id}`
+- Respuesta: `204 No Content`
+
+## 7) Roles por Usuario
 
 Rutas protegidas con Sanctum.
 
@@ -270,7 +426,7 @@ Respuesta 200:
 }
 ```
 
-## 7) Endpoints de Documentos
+## 8) Endpoints de Documentos
 
 Rutas protegidas con Sanctum.
 
@@ -346,7 +502,7 @@ Respuesta 201:
 - Metodo: `DELETE /documents/{id}`
 - Respuesta: `204 No Content`
 
-## 8) Endpoints de Conversaciones
+## 9) Endpoints de Conversaciones
 
 Rutas protegidas con Sanctum.
 
@@ -411,7 +567,7 @@ Respuesta 201:
 }
 ```
 
-## 9) Endpoint de Mensajes
+## 10) Endpoint de Mensajes
 
 Ruta protegida con Sanctum.
 
@@ -448,7 +604,7 @@ Respuesta 200:
 
 Adicionalmente, el backend emite un evento de broadcast (`MessageSent`) para realtime.
 
-## 10) Manejo de errores para Next.js
+## 11) Manejo de errores para Next.js
 
 Para validaciones Laravel (422), normalmente recibiras:
 
@@ -468,7 +624,7 @@ Recomendacion en frontend:
 - Mostrar `message` como resumen.
 - Mostrar `errors[field][0]` debajo de cada input.
 
-## 11) Ejemplo rapido de cliente API en Next.js
+## 12) Ejemplo rapido de cliente API en Next.js
 
 ```ts
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api';
@@ -506,7 +662,7 @@ export async function apiFetch<T>(path: string, options: ApiOptions = {}): Promi
 }
 ```
 
-## 12) Checklist de integracion
+## 13) Checklist de integracion
 
 - Guardar `access_token` despues de login.
 - Enviar `Authorization: Bearer ...` en rutas protegidas.
