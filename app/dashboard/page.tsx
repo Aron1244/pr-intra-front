@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { DashboardSidebar } from "@/components/dashboard-sidebar";
-import { API_BASE, ApiClientError, apiFetch } from "@/lib/api-client";
+import { ApiClientError, apiFetch } from "@/lib/api-client";
 import { clearAccessToken } from "@/lib/auth-token";
 
 type MeResponse = {
@@ -51,28 +51,7 @@ type Announcement = {
     id: number;
     name: string;
   } | null;
-  attachments?: Array<{
-    id: number;
-    file_path: string;
-    file_url?: string;
-    original_name: string;
-    mime_type?: string | null;
-    is_image?: boolean;
-  }>;
- };
-
- type Comment = {
-   id: number;
-   user_id: number;
-   announcement_id: number;
-   content: string;
-   user?: {
-     id: number;
-     name: string;
-   };
-   created_at: string;
-   updated_at: string;
- };
+};
 
 function formatRelativeTime(isoDate: string): string {
   const now = Date.now();
@@ -110,62 +89,15 @@ function getConversationTitle(conversation: Conversation, currentUserId?: number
   return `Conversacion ${conversation.id}`;
 }
 
-function resolveAttachmentUrl(fileUrl: string | undefined, filePath: string): string {
-  const backendOrigin = API_BASE.replace(/\/+api$/, "");
-
-  if (fileUrl && /^https?:\/\//i.test(fileUrl)) {
-    try {
-      const remoteUrl = new URL(fileUrl);
-      const backendUrl = new URL(backendOrigin);
-      const isLocalHost = remoteUrl.hostname === "localhost" || remoteUrl.hostname === "127.0.0.1";
-
-      if (isLocalHost && !remoteUrl.port && backendUrl.port) {
-        remoteUrl.port = backendUrl.port;
-      }
-
-      return remoteUrl.toString();
-    } catch {
-      return fileUrl;
-    }
-  }
-
-  if (fileUrl) {
-    return `${backendOrigin}${fileUrl.startsWith("/") ? "" : "/"}${fileUrl}`;
-  }
-
-  return `${backendOrigin}/storage/${filePath}`;
-}
-
 export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingChats, setIsLoadingChats] = useState(true);
   const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(true);
-  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [user, setUser] = useState<MeResponse["data"] | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationPreviews, setConversationPreviews] = useState<Record<number, string>>({});
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [commentsByAnnouncement, setCommentsByAnnouncement] = useState<Record<number, Comment[]>>({});
-  const [commentDrafts, setCommentDrafts] = useState<Record<number, string>>({});
-  const [expandedCommentPostId, setExpandedCommentPostId] = useState<number | null>(null);
-  const [viewerImages, setViewerImages] = useState<Array<{ url: string; name: string }>>([]);
-  const [viewerIndex, setViewerIndex] = useState(0);
-  
-  // Load comments for an announcement from API
-  const loadComments = async (announcementId: number) => {
-    try {
-      const response = await apiFetch<{ data: Comment[] }>(`/announcements/${announcementId}/comments`, {
-        method: "GET",
-      });
-      setCommentsByAnnouncement((current) => ({
-        ...current,
-        [announcementId]: Array.isArray(response.data) ? response.data : [],
-      }));
-    } catch {
-      // Silently fail comment loading
-    }
-  };
 
   useEffect(() => {
     let ignore = false;
@@ -267,11 +199,6 @@ export default function DashboardPage() {
 
         if (!ignore) {
           setAnnouncements(announcementsResponse);
-          
-            // Load comments for each announcement
-            for (const announcement of announcementsResponse) {
-              void loadComments(announcement.id);
-            }
         }
       } catch {
         if (!ignore) {
@@ -296,141 +223,19 @@ export default function DashboardPage() {
   const roles = user?.roles?.map((role) => role.name.toLowerCase()) ?? [];
   const isAdmin = roles.includes("admin");
   const canManageAnnouncements = Boolean(user?.can_manage_announcements);
-  const isViewerOpen = viewerImages.length > 0;
-
-  const openImageViewer = (images: Array<{ url: string; name: string }>, index = 0) => {
-    setViewerImages(images);
-    setViewerIndex(index);
-  };
-
-  const closeImageViewer = () => {
-    setViewerImages([]);
-    setViewerIndex(0);
-  };
-
-  const goToPreviousImage = () => {
-    setViewerIndex((current) => {
-      if (viewerImages.length === 0) {
-        return current;
-      }
-
-      return (current - 1 + viewerImages.length) % viewerImages.length;
-    });
-  };
-
-  const goToNextImage = () => {
-    setViewerIndex((current) => {
-      if (viewerImages.length === 0) {
-        return current;
-      }
-
-      return (current + 1) % viewerImages.length;
-    });
-  };
-
-  const handleAddComment = (postId: number) => {
-    if (isSubmittingComment) {
-      return;
-    }
-
-    const rawComment = commentDrafts[postId] ?? "";
-    const commentText = rawComment.trim();
-
-    if (!commentText) {
-      return;
-    }
-
-      setIsSubmittingComment(true);
-
-      void apiFetch(`/announcements/${postId}/comments`, {
-        method: "POST",
-        body: {
-          announcement_id: postId,
-          content: commentText,
-        },
-      }).then(() => {
-        setCommentDrafts((current) => ({
-          ...current,
-          [postId]: "",
-        }));
-        void loadComments(postId);
-      }).catch(() => {
-        setErrorMessage("No se pudo agregar el comentario.");
-      }).finally(() => {
-        setIsSubmittingComment(false);
-      });
-  };
-
-  useEffect(() => {
-    if (!isViewerOpen) {
-      return;
-    }
-
-    const previousOverflow = window.document.body.style.overflow;
-    window.document.body.style.overflow = "hidden";
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setViewerImages([]);
-        setViewerIndex(0);
-      }
-
-      if (event.key === "ArrowLeft") {
-        setViewerIndex((current) => {
-          if (viewerImages.length === 0) {
-            return current;
-          }
-
-          return (current - 1 + viewerImages.length) % viewerImages.length;
-        });
-      }
-
-      if (event.key === "ArrowRight") {
-        setViewerIndex((current) => {
-          if (viewerImages.length === 0) {
-            return current;
-          }
-
-          return (current + 1) % viewerImages.length;
-        });
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.document.body.style.overflow = previousOverflow;
-    };
-  }, [isViewerOpen, viewerImages.length]);
 
   const departmentFeed = announcements
     .slice()
     .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
     .slice(0, 8)
-    .map((announcement) => {
-      const imageAttachments = (announcement.attachments ?? []).filter((attachment) => {
-        if (attachment.is_image || attachment.mime_type?.startsWith("image/")) {
-          return true;
-        }
-
-        const imageExtensionPattern = /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i;
-        return imageExtensionPattern.test(attachment.original_name) || imageExtensionPattern.test(attachment.file_path);
-      });
-
-      return {
-        id: announcement.id,
-        department: announcement.department?.name ?? "General",
-        title: announcement.title,
-        body: announcement.content,
-        time: formatRelativeTime(announcement.created_at),
-        author: announcement.creator?.name ?? "Usuario",
-        images: imageAttachments.map((attachment) => ({
-          url: resolveAttachmentUrl(attachment.file_url, attachment.file_path),
-          name: attachment.original_name,
-        })),
-      };
-    });
+    .map((announcement) => ({
+      id: announcement.id,
+      department: announcement.department?.name ?? "General",
+      title: announcement.title,
+      body: announcement.content,
+      time: formatRelativeTime(announcement.created_at),
+      author: announcement.creator?.name ?? "Usuario",
+    }));
 
   const chatContacts = conversations
     .slice()
@@ -460,9 +265,7 @@ export default function DashboardPage() {
               <header className="rounded-3xl border border-intra-border bg-white p-6 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold tracking-[0.18em] text-intra-accent uppercase">
-                      Dashboard
-                    </p>
+                    <p className="text-xs font-semibold tracking-[0.18em] text-intra-accent uppercase">Dashboard</p>
                     <h2 className="mt-2 text-3xl font-semibold tracking-tight text-intra-secondary">
                       Feed de departamentos
                     </h2>
@@ -521,156 +324,39 @@ export default function DashboardPage() {
                     </article>
                   ) : null}
 
-                  {departmentFeed.map((post) => {
-                    const compactBody = post.body.replace(/\s+/g, " ").trim();
-                    const previewBody = compactBody.length > 220 ? `${compactBody.slice(0, 220)}...` : compactBody;
-                    const hasMore = compactBody.length > previewBody.length;
-                    const comments = commentsByAnnouncement[post.id] ?? [];
-                    const isCommentPanelOpen = expandedCommentPostId === post.id;
-
-                    return (
-                      <article key={post.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="px-5 pt-5 pb-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3">
-                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-700">
-                                {post.author.charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <p className="text-sm font-semibold text-slate-900">{post.author}</p>
-                                <p className="text-xs text-slate-600">{post.department} - Publicacion interna</p>
-                                <p className="text-xs text-slate-500">{post.time}</p>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="rounded-full p-1.5 text-slate-500 transition hover:bg-slate-100"
-                              aria-label="Mas opciones"
-                            >
-                              ...
-                            </button>
-                          </div>
-
-                          <h3 className="mt-4 text-lg font-semibold text-slate-900">{post.title}</h3>
-                          <p className="mt-2 text-sm leading-relaxed text-slate-700">{previewBody}</p>
-                          {hasMore ? (
-                            <button type="button" className="mt-1 text-sm font-medium text-slate-500 hover:text-slate-700">
-                              ... mas
-                            </button>
-                          ) : null}
-                        </div>
-
-                        {post.images.length > 0 ? (
-                          <div className="border-y border-slate-200 bg-slate-100 px-3 py-3">
-                            <button
-                              type="button"
-                              onClick={() => openImageViewer(post.images, 0)}
-                              className="block w-full"
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={post.images[0].url}
-                                alt={post.images[0].name ?? post.title}
-                                className="h-[340px] w-full object-contain md:h-[560px]"
-                              />
-                            </button>
-
-                            {post.images.length > 1 ? (
-                              <div className="mt-3 grid grid-cols-4 gap-2">
-                                {post.images.slice(1, 5).map((image, imageIndex) => (
-                                  <button
-                                    key={`${post.id}-${image.url}-${imageIndex}`}
-                                    type="button"
-                                    onClick={() => openImageViewer(post.images, imageIndex + 1)}
-                                    className="overflow-hidden rounded-lg border border-slate-200 bg-white"
-                                  >
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                      src={image.url}
-                                      alt={image.name}
-                                      className="h-20 w-full object-contain"
-                                    />
-                                  </button>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        <div className="border-t border-slate-200 px-5 py-2 text-xs text-slate-500">
-                          Publicacion destacada del departamento
-                        </div>
-
-                        <div className="grid grid-cols-2 border-t border-slate-200 text-sm text-slate-600 sm:grid-cols-4">
-                          <button type="button" className="px-3 py-2.5 font-medium transition hover:bg-slate-50">
-                            Recomendar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setExpandedCommentPostId((current) => (current === post.id ? null : post.id))}
-                            className="px-3 py-2.5 font-medium transition hover:bg-slate-50"
-                          >
-                            Comentar ({comments.length})
-                          </button>
-                          <button type="button" className="px-3 py-2.5 font-medium transition hover:bg-slate-50">
-                            Compartir
-                          </button>
-                          <button type="button" className="px-3 py-2.5 font-medium transition hover:bg-slate-50">
-                            Enviar
-                          </button>
-                        </div>
-
-                        {isCommentPanelOpen ? (
-                          <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
-                            <div className="mb-3 max-h-52 space-y-2 overflow-auto pr-1">
-                              {comments.length === 0 ? (
-                                <p className="text-sm text-slate-500">Todavia no hay comentarios en esta publicacion.</p>
-                              ) : null}
-
-                              {comments.map((comment) => (
-                                  <article key={`${comment.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                                  <div className="flex items-center justify-between gap-2">
-                                      <p className="text-xs font-semibold text-slate-700">{comment.user?.name ?? "Usuario"}</p>
-                                      <p className="text-xs text-slate-500">{formatRelativeTime(comment.created_at)}</p>
-                                  </div>
-                                    <p className="mt-1 text-sm text-slate-700">{comment.content}</p>
-                                </article>
-                              ))}
-                            </div>
-
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={commentDrafts[post.id] ?? ""}
-                                onChange={(event) =>
-                                  setCommentDrafts((current) => ({
-                                    ...current,
-                                    [post.id]: event.target.value,
-                                  }))
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    handleAddComment(post.id);
-                                  }
-                                }}
-                                placeholder="Escribe un comentario..."
-                                className="h-10 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-intra-primary focus:ring-2 focus:ring-intra-primary/20"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleAddComment(post.id)}
-                                disabled={isSubmittingComment}
-                                className="h-10 rounded-xl bg-intra-primary px-3 text-sm font-semibold text-white transition hover:bg-[#173d7d] disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isSubmittingComment ? "Publicando..." : "Publicar"}
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                      </article>
-                    );
-                  })}
+                  {departmentFeed.map((post) => (
+                    <article key={post.id} className="rounded-3xl border border-intra-border bg-white p-6 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="rounded-full bg-intra-ligth px-3 py-1 text-xs font-semibold text-intra-secondary">
+                          {post.department}
+                        </p>
+                        <p className="text-xs text-intra-secondary/55">{post.time}</p>
+                      </div>
+                      <h3 className="mt-4 text-xl font-semibold text-intra-secondary">{post.title}</h3>
+                      <p className="mt-2 text-sm leading-relaxed text-intra-secondary/75">{post.body}</p>
+                      <p className="mt-3 text-xs text-intra-secondary/55">Publicado por {post.author}</p>
+                      <div className="mt-5 flex gap-3 text-sm">
+                        <button
+                          type="button"
+                          className="rounded-xl border border-intra-border px-4 py-2 text-intra-secondary transition hover:bg-intra-ligth"
+                        >
+                          Me gusta
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-intra-border px-4 py-2 text-intra-secondary transition hover:bg-intra-ligth"
+                        >
+                          Comentar
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-intra-border px-4 py-2 text-intra-secondary transition hover:bg-intra-ligth"
+                        >
+                          Compartir
+                        </button>
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </section>
             </div>
@@ -720,71 +406,6 @@ export default function DashboardPage() {
           </div>
         </section>
       </main>
-
-      {isViewerOpen ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 p-4">
-          <button
-            type="button"
-            className="absolute top-4 right-4 rounded-full border border-white/40 px-3 py-1 text-sm font-semibold text-white hover:bg-white/10"
-            onClick={closeImageViewer}
-          >
-            Cerrar
-          </button>
-
-          {viewerImages.length > 1 ? (
-            <button
-              type="button"
-              className="absolute left-4 rounded-full border border-white/40 px-3 py-2 text-xl text-white hover:bg-white/10"
-              onClick={goToPreviousImage}
-              aria-label="Imagen anterior"
-            >
-              {'<'}
-            </button>
-          ) : null}
-
-          <div className="mx-auto w-full max-w-6xl">
-            <figure className="overflow-hidden rounded-2xl bg-black/20">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={viewerImages[viewerIndex]?.url}
-                alt={viewerImages[viewerIndex]?.name ?? "Imagen de publicacion"}
-                className="max-h-[78vh] w-full object-contain"
-              />
-            </figure>
-            <div className="mt-3 flex items-center justify-between text-sm text-white/90">
-              <p className="truncate pr-4">{viewerImages[viewerIndex]?.name}</p>
-              <p>{viewerIndex + 1} / {viewerImages.length}</p>
-            </div>
-
-            {viewerImages.length > 1 ? (
-              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                {viewerImages.map((image, imageIndex) => (
-                  <button
-                    key={`${image.url}-${imageIndex}`}
-                    type="button"
-                    onClick={() => setViewerIndex(imageIndex)}
-                    className={`overflow-hidden rounded-lg border ${imageIndex === viewerIndex ? "border-white" : "border-white/30"}`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={image.url} alt={image.name} className="h-14 w-20 object-cover" />
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          {viewerImages.length > 1 ? (
-            <button
-              type="button"
-              className="absolute right-4 rounded-full border border-white/40 px-3 py-2 text-xl text-white hover:bg-white/10"
-              onClick={goToNextImage}
-              aria-label="Siguiente imagen"
-            >
-              {'>'}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
