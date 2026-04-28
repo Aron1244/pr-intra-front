@@ -301,9 +301,9 @@ export default function ConversationsPage() {
               { method: "GET" },
             );
 
-            return [candidate.id, response.data.roles ?? []] as const;
+            return [candidate.id, (response.data.roles ?? []) as RoleSummary[]] as const;
           } catch {
-            return [candidate.id, []] as const;
+            return [candidate.id, [] as RoleSummary[]] as const;
           }
         }),
       );

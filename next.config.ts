@@ -4,6 +4,9 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 const backendOrigin = apiUrl.replace(/\/+$/, "").replace(/\/api$/, "");
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: process.cwd(),
+  },
   images: {
     remotePatterns: [
       {
