@@ -1,5 +1,7 @@
 # PR Intra Front
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Aron1244/pr-intra-front)
+
 Frontend de intranet corporativa construido con Next.js (App Router) que consume un backend Laravel API (Sanctum + broadcasting).
 
 El proyecto incluye:
